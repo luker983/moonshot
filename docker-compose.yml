@@ -1,0 +1,76 @@
+services:
+  traefik:
+    image: traefik:v2.5
+    restart: always
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:8080"
+    ports:
+      - "8080:8080"
+    networks:
+      - 1_earth
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  earthlink:
+    build:
+      context: .
+      dockerfile: dtnd.Dockerfile
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.earthlink.rule=Host(`lander`)"
+      - "traefik.http.routers.earthlink.entrypoints=web"
+      - "traefik.http.services.earthlink.loadbalancer.server.port=8080"
+      - "traefik.docker.network=1_earth"
+    networks:
+      - 1_earth
+      - 2_moon
+    cap_add:
+      - NET_ADMIN
+    command:
+      - /bin/sh 
+      - -c
+      - |
+        tc qdisc add dev eth1 root netem delay 1337ms 137ms
+        ./bpproxy -node dtn://earth-1/ -peer dtn://moon-1/ -peername lunalink -store /store
+      
+
+  lunalink:
+    build:
+      context: .
+      dockerfile: dtnd.Dockerfile
+    networks:
+      - 2_moon
+      - 3_lander
+    cap_add:
+      - NET_ADMIN
+    command:
+      - /bin/sh 
+      - -c
+      - |
+        tc qdisc add dev eth0 root netem delay 1337ms 137ms
+        ./bpproxy -node dtn://moon-1/ -peer dtn://earth-1/ -peername earthlink -store /store
+
+  lander:
+    build:
+      context: .
+      dockerfile: lander.Dockerfile
+    networks:
+      - 3_lander
+    env_file:
+      - .env
+    expose:
+      - "8080"
+
+networks:
+  1_earth:
+    driver: bridge
+    name: 1_earth
+  2_moon:
+    driver: bridge
+    name: 2_moon
+  3_lander:
+    driver: bridge
+    name: 3_lander
+
